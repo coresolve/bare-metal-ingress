@@ -1,0 +1,97 @@
+apiVersion: extensions/v1beta1
+kind: DaemonSet
+metadata:
+  generation: 1
+  labels:
+    app: tectonic-lb
+    component: ingress-controller
+    type: nginx
+  name: tectonic-ingress-controller
+  namespace: tectonic-system
+spec:
+  selector:
+    matchLabels:
+      app: tectonic-lb
+      component: ingress-controller
+      type: nginx
+  template:
+    metadata:
+      annotations:
+        scheduler.alpha.kubernetes.io/affinity: |
+          {
+            "nodeAffinity": {
+              "requiredDuringSchedulingIgnoredDuringExecution": {
+                "nodeSelectorTerms": [
+                  {
+                    "matchExpressions": [
+                      {
+                        "key": "tectonic-ingress",
+                        "operator": "Exists"
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+      labels:
+        app: tectonic-lb
+        component: ingress-controller
+        type: nginx
+    spec:
+      containers:
+      - args:
+        - /nginx-ingress-controller
+        - --nginx-configmap=$(POD_NAMESPACE)/tectonic-custom-error
+        - --default-backend-service=$(POD_NAMESPACE)/default-http-backend
+        - --default-ssl-certificate=tectonic-system/tectonic-tls-secret
+        - --watch-namespace=tectonic-system
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.namespace
+        image: gcr.io/google_containers/nginx-ingress-controller:0.8.3
+        imagePullPolicy: IfNotPresent
+        livenessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /healthz
+            port: 10254
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 1
+        name: nginx-ingress-lb
+        ports:
+        - containerPort: 80
+          hostPort: 80
+          name: http
+          protocol: TCP
+        - containerPort: 443
+          hostPort: 443
+          name: https
+          protocol: TCP
+        readinessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /healthz
+            port: 10254
+            scheme: HTTP
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 1
+        resources: {}
+        terminationMessagePath: /dev/termination-log
+      dnsPolicy: ClusterFirst
+      hostNetwork: true
+      restartPolicy: Always
+      securityContext: {}
+      terminationGracePeriodSeconds: 60
