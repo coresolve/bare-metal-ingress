@@ -1,14 +1,9 @@
-##Problem Description:
+## Problem Description:
 
 The default tectonic ingress controller will start an pod on each worker node and bind to port 443 and port 80.
 We would like to create a different ingress controller and be able to bind to those ports.
-This walkthrough will take us through:
-1. limiting the default tectonic-ingress-controller to one node.
-1. Creating a new ingress controller.
-1. Creating a new ingress.
-1. Creating a test app.
 
-##Understand the current state:
+## Understand the current state:
 We need to update the pattern used by the tectonic ingress controller. 
 
 Currently, tectonic-ingress-controller will place controller on any node that doesn't have the label "master"
@@ -18,7 +13,7 @@ You can see this in your cluster by running:
 `kubectl get ds --namespace=tectonic-system tectonic-ingress-controller -o yaml`
 
 Part of that will describe the affinity settings:
-
+```yaml
       annotations:
         scheduler.alpha.kubernetes.io/affinity: |
           {
@@ -37,36 +32,45 @@ Part of that will describe the affinity settings:
               }
             }
           }
-
+```
 This match is equivelent to:
 
 `kubectl get nodes -l '!master'`
 
 This will give you a list of nodes that are "workers"
+```livescript
+$ kubectl get node -l '!master'
+NAME                            STATUS    AGE
+worker001.bmetal.mauilion.com   Ready     10d
+worker002.bmetal.mauilion.com   Ready     10d
+worker003.bmetal.mauilion.com   Ready     10d
+```
 
-##Create new labels:
-We need to change the logic here. So we will label the first worker `tectonic-ingress=true`. To do this I am using the jsonpath expression to return the first node where it's labels  don't match master=true.
+## Create new labels:
+We need to change the logic here. So we will label the first worker `tectonic-ingress=true`. To do this I am using the jsonpath expression to return the first node where it's labels don't have `master` defined.
 
 `kubectl label node $(kubectl get node -l '!master' -o jsonpath={.items[0].metadata.name}) tectonic-ingress=true`
 
 This should tell us that one of the worker nodes has been labeled:
-
-`$ kubectl label node $(kubectl get node -l '!master' -o jsonpath={.items[0].metadata.name}) tectonic-ingress=true
-node "worker001.bmetal.mauilion.com" labeled`
+```livescript
+$ kubectl label node $(kubectl get node -l '!master' -o jsonpath={.items[0].metadata.name}) tectonic-ingress=true
+node "worker001.bmetal.mauilion.com" labeled
+```
 
 Now we will label the rest of the nodes with `my-ingress=true`
-```
+```livescript
 $ kubectl label node -l '!master,!tectonic-ingress' my-ingress=true
 node "worker002.bmetal.mauilion.com" labeled
 node "worker003.bmetal.mauilion.com" labeled
 ```
 
+
 Now that are labels are in place we can start doing the fun stuff.
 
-##Change the tectonic-ingress-controller daemonset:
+## Change the tectonic-ingress-controller daemonset:
 Let's see the controller pods that are running: 
 
-```
+```livescript
 $ kubectl get po --namespace=tectonic-system -l app=tectonic-lb
 NAME                                READY     STATUS    RESTARTS   AGE
 tectonic-ingress-controller-7741f   1/1       Running   0          10d
@@ -76,13 +80,13 @@ tectonic-ingress-controller-l8hlh   1/1       Running   0          10d
 
 Then we will patch the tectonic-ingress-controller daemonset with:
 
-```
+```livescript
 $ kubectl apply -f update-tectonic/patched-tectonic-ingress-ds.yaml
 daemonset "tectonic-ingress-controller" configured
 ```
 Now we should see the ds reduce to one pod.
 
-```
+```livescript
 $ kubectl get po --namespace=tectonic-system -l app=tectonic-lb
 NAME                                READY     STATUS    RESTARTS   AGE
 tectonic-ingress-controller-7741f   1/1       Running   0          10d
@@ -90,12 +94,12 @@ tectonic-ingress-controller-7741f   1/1       Running   0          10d
 
 If you take a look at the patched-tectonic-ingress-ds.yaml file you can see that the selector logic has changed to select only those nodes with tectonic-ingress defined.
 
-##Create our own ingress-controller:
+## Create our own ingress-controller:
 Now we can begin setting up our own ingress.
 
 cd into the my-ingress folder and create the resources:
 
-```
+```livescript
 $ cd my-ingress
 $ kubectl create -f .
 replicationcontroller "default-http-backend" created
@@ -111,7 +115,7 @@ The other files will create a default-http-backend with will serve as a fallback
 
 to check on the status of these resources you can:
 
-```
+```livescript
 $ kubectl get rc,svc,ds -l my-ingress -n kube-system
 NAME                      DESIRED   CURRENT   READY     AGE
 rc/default-http-backend   1         1         1         10m
@@ -123,10 +127,10 @@ NAME                          DESIRED   CURRENT   READY     NODE-SELECTOR   AGE
 ds/nginx-ingress-controller   2         2         2         <none>          10m
 ```
 
-##Create a test-app and test it.
+## Create a test-app and test it.
 Now we can test this ingress with a test-app.
 
-```
+```livescript
 $ cd ../test-app
 $ kubectl create -f .
 deployment "echoserver" created
@@ -135,7 +139,7 @@ service "echoserver" created
 ```
 To check on the status of these resources you can:
 
-```
+```livescript
 $ kubectl get all -l run=echoserver
 NAME                            READY     STATUS    RESTARTS   AGE
 po/echoserver-308202803-xmncz   1/1       Running   0          8s
@@ -152,7 +156,7 @@ rs/echoserver-308202803   1         1         1         8s
 
 Now to determine the ip addresses that our new ingresses are exposed on.
 
-```
+```livescript
 $ kubectl describe ingress echoserver-ingress
 Name:			echoserver-ingress
 Namespace:		default
@@ -181,15 +185,15 @@ In the above you can see the line `Address:		10.0.0.51,10.0.0.52,10.0.0.52` This
 
 To test this you can add the following to your hosts file:
 
-```
+```bash
 10.0.0.52 echo.me this.me
 ```
 
-_You will want to use your *own* address here not 10.0.0.52_
+**You will want to use your _own address_ here not 10.0.0.52**
 
-However, in my case a curl shows the output from our echoserver app. 
+However, in my case a curl shows the output from our echoserver app.
 
-```
+```livescript
 $ curl echo.me
 CLIENT VALUES:
 client_address=10.2.3.0
@@ -218,7 +222,7 @@ BODY:
 ```
 
 and a curl to this.me (undefined and will fallback to the `default-http-backend` service. I get redirected to the tectonic console.
-```
+```livescript
 $ curl -Lk this.me
 
 --- SNIP ---
@@ -228,4 +232,14 @@ $ curl -Lk this.me
 --- SNIP ---
 ```
 
-##Profit!
+## Profit!
+
+At this point it's good to understand that if you take the worker that is hosting the tectonic-ingress-controller down. You will be unable to connect to the ui. In a cluster with enough nodes you might ensure that more than one node is given the `'tectonic-ingress=true'` label.
+
+You will still need to configure something reasonable in DNS. For our test-app we are using /etc/hosts. In reality you would want to create something like \*.yourapp.com and point that to the addresses that your ingress controller uses.
+
+To see the addresses for our ingress you can: 
+```livescript
+$ kubectl get ingress echoserver-ingress -o jsonpath='{range .status.loadBalancer.ingress[*]}{.ip}{","}{end}{"\n"}'
+10.0.0.52,10.0.0.51,10.0.0.51,
+```
